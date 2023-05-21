@@ -7,6 +7,7 @@ using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Windows.Devices.Enumeration;
 using Windows.Storage.Streams;
+using Windows.UI;
 using Forms = System.Windows.Forms;
 
 namespace LightstripSyncClient
@@ -17,6 +18,7 @@ namespace LightstripSyncClient
 
         public ObservableCollection<BluetoothLEDevice­> Devices { get; private set; } = new ObservableCollection<BluetoothLEDevice>();
         public BluetoothLEDevice lightStrip;
+
         private bool isRGBIC = false;
         private GattCharacteristic lightChar;
         private bool charFound = false;
@@ -65,7 +67,7 @@ namespace LightstripSyncClient
             var bluetoothLEDevice = await BluetoothLEDevice.FromIdAsync(deviceInformation.Id);
 
             var deviceName = bluetoothLEDevice.Name;
-            return deviceName.Substring(0, 4) == "ihom" ? bluetoothLEDevice : null;
+            return deviceName.StartsWith("ihom") == true ? bluetoothLEDevice : null;
         }
 
         public async Task<bool> InitiateConnection(BluetoothLEDevice device)
@@ -78,7 +80,6 @@ namespace LightstripSyncClient
             if (charFound)
             {
                 MaintainConnection();
-
                 return true;
             }
             return false;
@@ -131,7 +132,7 @@ namespace LightstripSyncClient
 
         public void ChangeColor(System.Drawing.Color color)
         {
-            var hexColor = ColorConverter.RgbToHex(new RGB(color.R, color.G, color.B));
+            var hexColor = ColorHelper.ColorConverter.RgbToHex(new RGB(color.R, color.G, color.B));
             WriteCharacteristic(CreateBluetoothColourDataBytes(hexColor.ToString()));
         }
 
@@ -219,10 +220,8 @@ namespace LightstripSyncClient
 
         public bool checkRGBIC()
         {
-            return lightStrip.Name.Contains("ihoment_H6143");
+            return lightStrip.Name.Contains("ihoment_H6127_330E");
         }
-
-
     }
 }
 

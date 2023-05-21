@@ -1,126 +1,126 @@
 ﻿using System;
 using System.Drawing;
-using System.Threading.Tasks;
-using System.Windows.Forms;
+using System.Linq;
+using System.Threading;
+using CSCore;
+using CSCore.SoundIn;
+using CSCore.Streams;
+
 
 namespace LightstripSyncClient
 {
     public class ColorSync
     {
         private bool loop = false;
-        private Bitmap bitmap;
-        private Graphics graphics;
 
-        private readonly int bitmapRes = 150;
         private readonly double smoothSpeed = 0.8;
-        private readonly int refreshRate = 5;
-        private readonly int blackFilter = 220;
-        private readonly int whiteFilter = 220;
+        private readonly int refreshRate = 2;
+
         public void ToggleSync(bool state, BluetoothLEConnectionManager bluetoothLEConnectionManager)
         {
             loop = state;
+
             if (loop)
             {
-                SyncLoop(bluetoothLEConnectionManager);
-            }
-        }
-
-        private async void SyncLoop(BluetoothLEConnectionManager bluetoothLEConnectionManager)
-        {
-            var oldColor = Color.White;
-            while (loop)
-            {
-                using (bitmap = new Bitmap(Screen.PrimaryScreen.Bounds.Width, Screen.PrimaryScreen.Bounds.Height))
+                // Create a separate thread for audio processing
+                Thread audioThread = new Thread(() =>
                 {
-                    using (graphics = Graphics.FromImage(bitmap))
+                    // Create an instance of the sound capture device
+                    using (var captureDevice = new WasapiLoopbackCapture())
                     {
-                        graphics.CopyFromScreen(Screen.PrimaryScreen.Bounds.X, Screen.PrimaryScreen.Bounds.Y, 0, 0, Screen.PrimaryScreen.Bounds.Size, CopyPixelOperation.SourceCopy);
-                        bitmap = ResizeBitmap(bitmap, bitmapRes, bitmapRes);
+                        // Set up event handlers for audio data capture
+                        captureDevice.Initialize();
 
-                        var newColor = FindDominantColour(bitmap);
+                        // Create a sound source to read audio data from the capture device
+                        using (var soundSource = new SoundInSource(captureDevice))
+                        {
+                            // Create a sample source to provide audio data to the sound source
+                            using (var sampleSource = soundSource.ToSampleSource())
+                            {
+                                // Specify the desired sample rate and number of channels for audio processing
+                                const int desiredSampleRate = 44100;
+                                const int desiredChannels = 2;
 
-                        newColor = SmoothColor(oldColor, newColor, smoothSpeed);
+                                // Resample and convert the audio if necessary
+                                var resampledSource = sampleSource;
 
-                        bluetoothLEConnectionManager.ChangeColor(newColor);
+                                if (sampleSource.WaveFormat.SampleRate != desiredSampleRate || sampleSource.WaveFormat.Channels != desiredChannels)
+                                {
+                                    resampledSource = sampleSource.ChangeSampleRate(desiredSampleRate).ToStereo();
+                                }
 
-                        oldColor = newColor;
+                                float[] buffer = new float[desiredSampleRate / 10 * desiredChannels];
 
-                        bitmap.Dispose();
-                        graphics.Dispose();
+                                // Start capturing audio data
+                                captureDevice.Start();
+
+                                var oldColor = Color.White;
+
+                                // Audio processing loop
+                                while (loop)
+                                {
+                                    // Read audio samples into the buffer
+                                    int samplesRead = resampledSource.Read(buffer, 0, buffer.Length);
+
+                                    // Check if any samples were read
+                                    if (samplesRead > 0)
+                                    {
+                                        // Process the audio samples to determine the LED color
+                                        var newColor = ProcessAudioSamples(buffer, samplesRead);
+
+                                        // Smooth the color transition
+                                        newColor = SmoothColor(oldColor, newColor, smoothSpeed);
+
+                                        // Change the LED color using the BluetoothLEConnectionManager
+                                        bluetoothLEConnectionManager.ChangeColor(newColor);
+
+                                        // Update the oldColor variable
+                                        oldColor = newColor;
+                                    }
+
+                                    // Delay for a short period to control the refresh rate
+                                    System.Threading.Thread.Sleep(refreshRate);
+                                }
+
+                                // Stop capturing audio data
+                                captureDevice.Stop();
+                            }
+                        }
                     }
-                }
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                await Task.Delay(refreshRate);
-            }
+                });
 
+                // Start the audio processing thread
+                audioThread.Start();
+            }
         }
 
-        public Bitmap ResizeBitmap(Bitmap bmp, int width, int height)
+
+
+        private Color ProcessAudioSamples(float[] buffer, int samplesRead)
         {
-            var result = new Bitmap(width, height);
-            using (var g = Graphics.FromImage(result))
+            if (samplesRead > 0)
             {
-                g.DrawImage(bmp, 0, 0, width, height);
+                // Perform audio analysis on the buffer and extract relevant information
+
+                // Calculate the average amplitude of the audio samples
+                float averageAmplitude = buffer.Take(samplesRead).Average(Math.Abs);
+
+                // Calculate the desired RGB values based on the audio analysis
+                int red = (int)(averageAmplitude * 255);
+                int green = 0;
+                int blue = 0;
+
+                // Clamp the RGB values within the valid range (0-255)
+                red = Math.Max(0, Math.Min(255, red));
+                green = Math.Max(0, Math.Min(255, green));
+                blue = Math.Max(0, Math.Min(255, blue));
+
+                // Create and return the new color based on the RGB values
+                return Color.FromArgb(red, green, blue);
             }
 
-            return result;
-        }
-
-        private Color FindDominantColour(Bitmap bmp)
-        {
-            //get initial cluster
-            var random = new Random();
-            _ = bmp.GetPixel(random.Next(0, bmp.Width), random.Next(0, bmp.Height));
-
-            var n = bmp.Width * bmp.Height;
-
-            double r = 0;
-            double g = 0;
-            double b = 0;
-
-            for (var x = 0; x < bmp.Width; x++)
-            {
-                for (var y = 0; y < bmp.Height; y++)
-                {
-                    var color = bmp.GetPixel(x, y);
-                    if (GetEuclideanDist(color, Color.Black) >= blackFilter && GetEuclideanDist(color, Color.White) >= whiteFilter)
-                    {
-                        r += color.R;
-                        g += color.G;
-                        b += color.B;
-                    }
-                    else
-                    {
-                        n--;
-                    }
-
-                }
-            }
-
-            ////clamp values
-            var red = (int)Math.Round(r / n);
-            var green = (int)Math.Round(g / n);
-            var blue = (int)Math.Round(b / n);
-
-            red = Math.Min(255, Math.Max(0, red));
-            green = Math.Min(255, Math.Max(0, green));
-            blue = Math.Min(255, Math.Max(0, blue));
-
-
-            var updatedCentre = Color.FromArgb(
-                red,
-                green,
-                blue
-                );
-            return updatedCentre;
-        }
-
-        private double GetEuclideanDist(Color c1, Color c2)
-        {
-            return Math.Sqrt(
-                Math.Pow(c1.R - c2.R, 2) + Math.Pow(c1.G - c2.G, 2) + Math.Pow(c1.B - c2.B, 2)
-                );
+            // If no samples were read, return a default color (e.g., black)
+            return Color.Black;
         }
 
         private Color SmoothColor(Color oldCol, Color newCol, double time)
@@ -146,3 +146,4 @@ namespace LightstripSyncClient
         }
     }
 }
+
