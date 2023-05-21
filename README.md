@@ -3,7 +3,7 @@
 
 A Windows Desktop Client to control Govee Lights.
 
-Includes a mode to sync the colour of the lights with the desktop colour. 
+Includes a mode to sync the colour of the lights with the ~~desktop colour~~ pc audio. 
 
 Thanks to BeauJBurroughs https://github.com/BeauJBurroughs/Govee-H6127-Reverse-Engineering for doing a lot of the hard work and figuring out how the lights work with Bluetooth Low Energy.
 
